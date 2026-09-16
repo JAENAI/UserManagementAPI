@@ -7,54 +7,101 @@ namespace UserManagementAPI.Controllers;
 [Route("api/[controller]")]
 public class UsersController : ControllerBase
 {
-    private static readonly List<User> Users = [];
+    private static readonly Dictionary<int, User> Users = [];
     private static readonly object UsersLock = new();
     private static int nextId = 1;
+
+    private readonly ILogger<UsersController> logger;
+
+    public UsersController(ILogger<UsersController> logger)
+    {
+        this.logger = logger;
+    }
 
     [HttpGet]
     public ActionResult<IEnumerable<User>> GetUsers()
     {
-        lock (UsersLock)
+        try
         {
-            return Ok(Users.ToList());
+            lock (UsersLock)
+            {
+                return Ok(Users.Values.ToArray());
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Unable to retrieve users.");
+            return Problem("The users could not be retrieved.");
         }
     }
 
     [HttpGet("{id:int}")]
     public ActionResult<User> GetUser(int id)
     {
-        lock (UsersLock)
+        if (id <= 0)
         {
-            var user = Users.FirstOrDefault(user => user.Id == id);
-            return user is null ? NotFound() : Ok(user);
+            return BadRequest("User ID must be greater than zero.");
+        }
+
+        try
+        {
+            lock (UsersLock)
+            {
+                return Users.TryGetValue(id, out var user) ? Ok(user) : NotFound();
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Unable to retrieve user {UserId}.", id);
+            return Problem("The user could not be retrieved.");
         }
     }
 
     [HttpPost]
     public ActionResult<User> CreateUser(User user)
     {
-        lock (UsersLock)
+        try
         {
-            user.Id = nextId++;
-            Users.Add(user);
-        }
+            lock (UsersLock)
+            {
+                user.Id = nextId++;
+                Users.Add(user.Id, user);
+            }
 
-        return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
+            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Unable to create user.");
+            return Problem("The user could not be created.");
+        }
     }
 
     [HttpPut("{id:int}")]
     public IActionResult UpdateUser(int id, User updatedUser)
     {
-        lock (UsersLock)
+        if (id <= 0)
         {
-            var user = Users.FirstOrDefault(user => user.Id == id);
-            if (user is null)
-            {
-                return NotFound();
-            }
+            return BadRequest("User ID must be greater than zero.");
+        }
 
-            user.Name = updatedUser.Name;
-            user.Email = updatedUser.Email;
+        try
+        {
+            lock (UsersLock)
+            {
+                if (!Users.TryGetValue(id, out var user))
+                {
+                    return NotFound();
+                }
+
+                user.Name = updatedUser.Name;
+                user.Email = updatedUser.Email;
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Unable to update user {UserId}.", id);
+            return Problem("The user could not be updated.");
         }
 
         return NoContent();
@@ -63,15 +110,25 @@ public class UsersController : ControllerBase
     [HttpDelete("{id:int}")]
     public IActionResult DeleteUser(int id)
     {
-        lock (UsersLock)
+        if (id <= 0)
         {
-            var user = Users.FirstOrDefault(user => user.Id == id);
-            if (user is null)
-            {
-                return NotFound();
-            }
+            return BadRequest("User ID must be greater than zero.");
+        }
 
-            Users.Remove(user);
+        try
+        {
+            lock (UsersLock)
+            {
+                if (!Users.Remove(id))
+                {
+                    return NotFound();
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Unable to delete user {UserId}.", id);
+            return Problem("The user could not be deleted.");
         }
 
         return NoContent();
